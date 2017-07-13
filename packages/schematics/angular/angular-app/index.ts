@@ -5,26 +5,30 @@
  * Use of this source code is governed by an MIT-style license that can be
  * found in the LICENSE file at https://angular.io/license
  */
-import * as stringUtils from '../strings';
+// TODO: replace `options: any` with an actual type generated from the schema.
+// tslint:disable:no-any
 import {
+  MergeStrategy,
   Rule,
   Tree,
   apply,
   chain,
   mergeWith,
+  move,
   schematic,
   template,
-  url
+  url,
 } from '@angular-devkit/schematics';
+import * as stringUtils from '../strings';
 import {addBootstrapToModule, addImportToModule} from '../utility/ast-utils';
 
 import * as ts from 'typescript';
 import {InsertChange} from '../utility/change';
 
 
-function addBootstrapToNgModule(): Rule {
+function addBootstrapToNgModule(directory: string): Rule {
   return (host: Tree) => {
-    const modulePath = 'src/app/app.module.ts';
+    const modulePath = `${directory}/src/app/app.module.ts`;
     const sourceText = host.read(modulePath) !.toString('utf-8');
     const source = ts.createSourceFile(modulePath, sourceText, ts.ScriptTarget.Latest, true);
 
@@ -40,7 +44,7 @@ function addBootstrapToNgModule(): Rule {
                                                   componentModule);
     const changes = [
       ...importChanges,
-      ...bootstrapChanges
+      ...bootstrapChanges,
     ];
 
     const recorder = host.beginUpdate(modulePath);
@@ -59,14 +63,24 @@ export default function (options: any): Rule {
   return chain([
     mergeWith(
       apply(url('./files'), [
-        template({ utils: stringUtils, ...options })
+        template({ utils: stringUtils, ...options }),
+        move(options.directory),
       ])),
-    schematic('module', { name: 'app' }),
+    schematic('module', {
+      name: 'app',
+      sourceDir: options.directory + '/' + options.sourceDir,
+    }),
     schematic('component', {
       name: 'app',
       selector: 'app-root',
-      flat: true
+      sourceDir: options.directory + '/' + options.sourceDir,
+      flat: true,
     }),
-    addBootstrapToNgModule()
+    addBootstrapToNgModule(options.directory),
+    mergeWith(
+      apply(url('./helper-files'), [
+        template({ utils: stringUtils, ...options }),
+        move(options.directory + '/' + options.sourceDir + '/app'),
+      ]), MergeStrategy.Overwrite),
   ]);
 };

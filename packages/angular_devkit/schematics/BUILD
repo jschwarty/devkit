@@ -9,18 +9,56 @@ licenses(["notice"])  # MIT License
 
 ts_library(
     name = "schematics",
-    srcs = [
-        "src/index.ts",
-    ],
+    srcs = glob(
+        include = ["src/**/*.ts"],
+        exclude = ["src/**/*_spec.ts", "src/**/*_benchmark.ts"],
+    ),
     deps = [
-        "//packages/angular_devkit/schematics/src/engine",
-        "//packages/angular_devkit/schematics/src/exception",
-        "//packages/angular_devkit/schematics/src/rules",
-        "//packages/angular_devkit/schematics/src/sink",
-        "//packages/angular_devkit/schematics/src/tree",
-        "//packages/angular_devkit/schematics/src/utility",
+        # @deps: rxjs
     ],
     tsconfig = "//:tsconfig.json",
     module_name = "@angular-devkit/schematics",
     module_root = "src"
+)
+
+ts_library(
+    name = "tools",
+    srcs = glob(
+        include = ["tools/**/*.ts"],
+        exclude = ["tools/**/*_spec.ts", "tools/**/*_benchmark.ts"],
+    ),
+    deps = [
+        ":schematics",
+        "//packages/angular_devkit/core",
+        # @deps: rxjs
+    ],
+    tsconfig = "//:tsconfig.json",
+    module_name = "@angular-devkit/schematics/tools",
+    module_root = "tools"
+)
+
+ts_library(
+    name = "spec",
+    srcs = glob(
+        include = ["src/**/*_spec.ts"],
+    ),
+    deps = [
+        ":schematics",
+        # @deps: rxjs
+        # @typings: jasmine
+    ],
+    tsconfig = "//:tsconfig.json",
+)
+
+ts_library(
+    name = "tools_spec",
+    srcs = glob(
+        include = ["tools/**/*_spec.ts"],
+    ),
+    deps = [
+        ":tools",
+        # @deps: rxjs
+        # @typings: jasmine
+    ],
+    tsconfig = "//:tsconfig.json",
 )

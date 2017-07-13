@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as glob from 'glob';
 import * as path from 'path';
 
+import {JsonObject, Logger} from '@angular-devkit/core';
 import {packages} from '../lib/packages';
 
 const minimatch = require('minimatch');
@@ -21,6 +22,7 @@ const gitIgnore = fs.readFileSync(path.join(__dirname, '../.gitignore'), 'utf-8'
 
 function gitIgnoreMatch(p: string) {
   p = path.relative(path.dirname(__dirname), p);
+
   return gitIgnore.some(line => minimatch(p, line));
 }
 
@@ -48,14 +50,14 @@ function copy(from: string, to: string) {
 }
 
 
-function recursiveCopy(from: string, to: string) {
+function recursiveCopy(from: string, to: string, logger: Logger) {
   if (!fs.existsSync(from)) {
-    console.error(`File "${from}" does not exist.`);
+    logger.error(`File "${from}" does not exist.`);
     process.exit(4);
   }
   if (fs.statSync(from).isDirectory()) {
     fs.readdirSync(from).forEach(fileName => {
-      recursiveCopy(path.join(from, fileName), path.join(to, fileName));
+      recursiveCopy(path.join(from, fileName), path.join(to, fileName), logger);
     });
   } else {
     copy(from, to);
@@ -78,8 +80,8 @@ function rimraf(p: string) {
 }
 
 
-export default function() {
-  console.log('Removing dist/...');
+export default function(_: {}, logger: Logger) {
+  logger.info('Removing dist/...');
   rimraf(path.join(__dirname, '../dist'));
 
   // Order packages in order of dependency.
@@ -106,38 +108,42 @@ export default function() {
   } while (swapped);
 
 
-  console.log('Building...');
+  logger.info('Building...');
   const tsConfigPath = path.relative(process.cwd(), path.join(__dirname, '../tsconfig.json'));
   try {
     npmRun.execSync(`tsc -p "${tsConfigPath}"`);
   } catch (err) {
     const stdout = err.stdout.toString().split('\n').join('\n  ');
-    console.error(`TypeScript compiler failed:\n\nSTDOUT:\n  ${stdout}`);
+    logger.error(`TypeScript compiler failed:\n\nSTDOUT:\n  ${stdout}`);
     process.exit(1);
   }
 
-  console.log('Moving packages to dist/');
+  logger.info('Moving packages to dist/');
+  const packageLogger = new Logger('packages', logger);
   for (const packageName of sortedPackages) {
-    console.log(`  ${packageName}`);
+    packageLogger.info(packageName);
     const pkg = packages[packageName];
-    recursiveCopy(pkg.build, pkg.dist);
+    recursiveCopy(pkg.build, pkg.dist, logger);
     rimraf(pkg.build);
   }
 
-  console.log('Copying resources...');
+  logger.info('Copying resources...');
+  const resourceLogger = new Logger('resources', logger);
   for (const packageName of sortedPackages) {
-    console.log(`  ${packageName}`);
+    resourceLogger.info(packageName);
     const pkg = packages[packageName];
     const pkgJson = pkg.packageJson;
     const files = glob.sync(path.join(pkg.root, '**/*'), { dot: true, nodir: true });
-    console.log(`    ${files.length} files total...`);
+    const subSubLogger = new Logger(packageName, resourceLogger);
+    subSubLogger.info(`${files.length} files total...`);
     const resources = files
       .map((fileName) => path.relative(pkg.root, fileName))
       .filter(fileName => {
         // Schematics template files.
-        if (pkgJson['schematics'] && fileName.match(/\/files\//)) {
+        if (pkgJson['schematics'] && fileName.match(/(\/|\\)files(\/|\\)/)) {
           return true;
         }
+
         if (fileName.endsWith('package.json')) {
           return true;
         }
@@ -151,9 +157,10 @@ export default function() {
         if (fileName.endsWith('.ts')) {
           // Verify that it was actually built.
           if (!fs.existsSync(path.join(pkg.dist, fileName).replace(/ts$/, 'js'))) {
-            console.error(`\nSource found but compiled file not found: "${fileName}".`);
+            subSubLogger.error(`\nSource found but compiled file not found: "${fileName}".`);
             process.exit(2);
           }
+
           // Skip all sources.
           return false;
         }
@@ -171,32 +178,34 @@ export default function() {
         return true;
       });
 
-    console.log(`    ${resources.length} resources...`);
+    subSubLogger.info(`${resources.length} resources...`);
     resources.forEach(fileName => {
       copy(path.join(pkg.root, fileName), path.join(pkg.dist, fileName));
     });
   }
 
-  console.log('Copying extra resources...');
+  logger.info('Copying extra resources...');
   for (const packageName of sortedPackages) {
     const pkg = packages[packageName];
     copy(path.join(__dirname, '../LICENSE'), path.join(pkg.dist, 'LICENSE'));
   }
 
-  console.log('Removing spec files...');
+  logger.info('Removing spec files...');
+  const specLogger = new Logger('specfiles', logger);
   for (const packageName of sortedPackages) {
-    console.log(`  ${packageName}`);
+    specLogger.info(packageName);
     const pkg = packages[packageName];
     const files = glob.sync(path.join(pkg.dist, '**/*_spec.js'));
-    console.log(`    ${files.length} spec files found...`);
+    specLogger.info(`  ${files.length} spec files found...`);
     files.forEach(fileName => rm(fileName));
   }
 
-  console.log('Setting versions...');
+  logger.info('Setting versions...');
 
-  const versions = require(path.join(__dirname, '../versions.json'));
+  const { versions } = require(path.join(__dirname, '../versions.json'));
+  const versionLogger = new Logger('versions', logger);
   for (const packageName of sortedPackages) {
-    console.log(`  ${packageName}`);
+    versionLogger.info(packageName);
     const pkg = packages[packageName];
     const packageJsonPath = path.join(pkg.dist, 'package.json');
     const packageJson = pkg.packageJson;
@@ -204,14 +213,15 @@ export default function() {
     if (versions[packageName]) {
       packageJson['version'] = versions[packageName];
     } else {
-      console.log('    No version found... Only updating dependencies.');
+      versionLogger.fatal('No version found... Only updating dependencies.');
     }
 
     for (const depName of Object.keys(versions)) {
       const v = versions[depName];
       for (const depKey of ['dependencies', 'peerDependencies', 'devDependencies']) {
-        if (packageJson[depKey] && packageJson[depKey][depName] == '0.0.0') {
-          packageJson[depKey][depName] = v;
+        const obj = packageJson[depKey] as JsonObject | null;
+        if (obj && obj[depName] == '0.0.0') {
+          obj[depName] = v;
         }
       }
     }
@@ -219,5 +229,5 @@ export default function() {
     fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
   }
 
-  console.log(`Done.`);
+  logger.info(`Done.`);
 }

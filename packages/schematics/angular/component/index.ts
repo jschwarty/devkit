@@ -5,6 +5,8 @@
  * Use of this source code is governed by an MIT-style license that can be
  * found in the LICENSE file at https://angular.io/license
  */
+// TODO: replace `options: any` with an actual type generated from the schema.
+// tslint:disable:no-any
 import {addDeclarationToModule} from '../utility/ast-utils';
 import {InsertChange} from '../utility/change';
 
@@ -23,9 +25,9 @@ import {
 } from '@angular-devkit/schematics';
 import * as stringUtils from '../strings';
 
-import * as ts from 'typescript';
 import 'rxjs/add/operator/merge';
-import {findModule, buildRelativePath} from '../utility/find-module';
+import * as ts from 'typescript';
+import { buildRelativePath, findModule } from '../utility/find-module';
 
 
 function addDeclarationToNgModule(options: any): Rule {
@@ -34,7 +36,15 @@ function addDeclarationToNgModule(options: any): Rule {
       return host;
     }
 
-    const modulePath = findModule(host, options.sourceDir + '/' + options.path);
+    let modulePath;
+    if (options.module) {
+      if (!host.exists(options.module)) {
+        throw new Error(`Module specified (${options.module}) does not exist.`);
+      }
+      modulePath = options.module;
+    } else {
+      modulePath = findModule(host, options.sourceDir + '/' + options.path);
+    }
 
     const sourceText = host.read(modulePath) !.toString('utf-8');
     const source = ts.createSourceFile(modulePath, sourceText, ts.ScriptTarget.Latest, true);
@@ -59,13 +69,16 @@ function addDeclarationToNgModule(options: any): Rule {
   };
 }
 
+
 function buildSelector(options: any) {
   let selector = stringUtils.dasherize(options.name);
   if (options.prefix) {
     selector = `${options.prefix}-${selector}`;
   }
+
   return selector;
 }
+
 
 export default function(options: any): Rule {
   options.selector = options.selector || buildSelector(options);
@@ -77,16 +90,16 @@ export default function(options: any): Rule {
     template({
       ...stringUtils,
       'if-flat': (s: string) => options.flat ? '' : s,
-      ...options
+      ...options,
     }),
-    move(options.sourceDir)
+    move(options.sourceDir),
   ]);
 
   return chain([
     branchAndMerge(chain([
       filter(path => path.endsWith('.module.ts') && !path.endsWith('-routing.module.ts')),
       addDeclarationToNgModule(options),
-      mergeWith(templateSource)
-    ]))
+      mergeWith(templateSource),
+    ])),
   ]);
 }

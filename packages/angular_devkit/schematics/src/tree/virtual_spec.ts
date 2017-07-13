@@ -5,12 +5,12 @@
  * Use of this source code is governed by an MIT-style license that can be
  * found in the LICENSE file at https://angular.io/license
  */
-import {MergeStrategy} from './interface';
-import {InMemoryFileSystemTreeHost} from './memory-host';
+import {FileAlreadyExistException, FileDoesNotExistException} from '../exception/exception';
 import {FileSystemTree} from './filesystem';
+import {FileEntry, MergeStrategy} from './interface';
+import {InMemoryFileSystemTreeHost} from './memory-host';
 import {merge, partition} from './static';
 import {VirtualTree} from './virtual';
-import {FileDoesNotExistException} from '../exception/exception';
 
 
 describe('VirtualTree', () => {
@@ -38,7 +38,7 @@ describe('VirtualTree', () => {
       tree.create('/some/other-file2', 'some _content');
 
       expect(tree.files).toEqual([
-        '/some/file', '/some/other-file', '/some/other-file2'
+        '/some/file', '/some/other-file', '/some/other-file2',
       ]);
     });
   });
@@ -96,7 +96,7 @@ describe('VirtualTree', () => {
   describe('optimize', () => {
     it('works', () => {
       const host = new InMemoryFileSystemTreeHost({
-        '/hello': 'world'
+        '/hello': 'world',
       });
       const tree = new FileSystemTree(host);
 
@@ -114,7 +114,7 @@ describe('VirtualTree', () => {
       const host = new InMemoryFileSystemTreeHost({
         '/hello': '',
         '/sub/file1': '',
-        '/sub/directory/file2': ''
+        '/sub/directory/file2': '',
       });
       const tree = new FileSystemTree(host);
 
@@ -135,6 +135,38 @@ describe('VirtualTree', () => {
       tree2.optimize();
       expect(tree.actions.length).toBe(4);
       expect(tree2.actions.length).toBe(2);
+    });
+  });
+
+  describe('rename', () => {
+    it('conflict fails', () => {
+      const host = new InMemoryFileSystemTreeHost({
+        '/hello': 'world',
+      });
+      const tree = new FileSystemTree(host);
+      tree.create('/base', 'base content');
+      const tree2 = new FileSystemTree(host);
+      tree2.create('/other-base', 'base content');
+      tree2.rename('/other-base', '/base');
+
+      expect(() => tree.merge(tree2))
+        .toThrow(new FileAlreadyExistException('/base'));
+    });
+
+    it('conflict works with overwrite', () => {
+      const host = new InMemoryFileSystemTreeHost({
+        '/hello': 'world',
+      });
+      const tree = new FileSystemTree(host);
+
+      const tree2 = new FileSystemTree(host);
+      const newContent = 'new content';
+      tree2.create('/greetings', newContent);
+      tree2.rename('/greetings', '/hello');
+
+      tree.merge(tree2, MergeStrategy.Overwrite);
+      const fileEntry = tree.get('/hello');
+      expect((<FileEntry>fileEntry).content.toString()).toEqual(newContent);
     });
   });
 });

@@ -7,12 +7,12 @@
  */
 'use strict';
 
+import {JsonObject} from '@angular-devkit/core';
 import * as glob from 'glob';
 import * as path from 'path';
 
 const packageRoot = path.join(__dirname, '../packages');
 const distRoot = path.join(__dirname, '../dist');
-const versions = require('../versions.json');
 
 
 export interface PackageInfo {
@@ -23,7 +23,8 @@ export interface PackageInfo {
   main: string;
   dist: string;
   build: string;
-  packageJson: any;
+  private: boolean;
+  packageJson: JsonObject;
   dependencies: string[];
 }
 export type PackageMap = { [name: string]: PackageInfo };
@@ -49,10 +50,12 @@ function loadPackageJson(p: string) {
 
       case 'keywords':
         const a = pkg[key] || [];
-        const b = Object.keys(root[key].concat(a).reduce((acc: any, curr: string) => {
-          acc[curr] = true;
-          return acc;
-        }, {}));
+        const b = Object.keys(
+          root[key].concat(a).reduce((acc: {[k: string]: boolean}, curr: string) => {
+            acc[curr] = true;
+
+            return acc;
+          }, {}));
         pkg[key] = b;
         break;
 
@@ -60,6 +63,7 @@ function loadPackageJson(p: string) {
         pkg[key] = root[key];
     }
   }
+
   return pkg;
 }
 
@@ -67,7 +71,9 @@ function loadPackageJson(p: string) {
 const packageJsonPaths =
   glob.sync(path.join(packageRoot, '**/package.json'))
     // Removing all files from templates.
-    .filter(p => !p.match(/\/angular.*files\//));
+    .filter(p => !p.match(/\/angular.*files\//))
+    // Remove extra build-optimizer package.json.
+    .filter(p => !p.match(/\/build_optimizer\/webpack-loader\//));
 
 
 // All the supported packages. Go through the packages directory and create a _map of
@@ -87,11 +93,6 @@ export const packages: PackageMap =
         bin[binName] = path.resolve(pkg.root, packageJson['bin'][binName]);
       });
 
-      if (!(name in versions)) {
-        console.error(`ERROR: package ${name} does not have a version.`);
-        process.exit(101);
-      }
-
       packages[name] = {
         build: path.join(distRoot, pkgRoot.substr(path.dirname(__dirname).length)),
         dist: path.join(distRoot, name),
@@ -99,10 +100,12 @@ export const packages: PackageMap =
         relative: path.relative(path.dirname(__dirname), pkgRoot),
         main: path.resolve(pkgRoot, 'src/index.ts'),
         dependencies: [],
+        private: packageJson.private,
         bin,
         name,
         packageJson,
       };
+
       return packages;
     }, {});
 
